@@ -9,18 +9,6 @@ import sys
 from datetime import datetime
 
 
-def resource_path(relative_path):
-    """ 获取资源的绝对路径，兼容开发环境和PyInstaller打包环境 """
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        # PyInstaller 打包后的路径
-        base_path = sys._MEIPASS
-    else:
-        # 开发环境下的路径，指向 src 目录
-        base_path = os.path.abspath("src")
-
-    return os.path.join(base_path, 'resources', relative_path)
-
-
 class BomGenerator:
     """BOM生成器类，用于处理Excel文件并生成BOM表
     
@@ -92,9 +80,16 @@ class BomGenerator:
         Note:
             Excel文件应包含复杂的多行表头结构，该方法会自动处理表头解析。
         """
-        # 设置资源文件路径，兼容开发环境和打包环境
-        self.template_path = resource_path('bom_template.xlsx')
-        self.color_codes_path = resource_path('color_codes.json')
+        # 简单有效的路径处理
+        if getattr(sys, 'frozen', False):
+            # 打包环境
+            base_path = sys._MEIPASS
+            self.template_path = os.path.join(base_path, 'resources', 'bom_template.xlsx')
+            self.color_codes_path = os.path.join(base_path, 'resources', 'color_codes.json')
+        else:
+            # 开发环境
+            self.template_path = 'src/resources/bom_template.xlsx'
+            self.color_codes_path = 'src/resources/color_codes.json'
         
         try:
             # 读取指定Excel文件中的"明细表"Sheet，手动处理复杂表头

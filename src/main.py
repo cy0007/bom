@@ -5,19 +5,24 @@ from tkinter import filedialog, messagebox
 import os
 import sys
 
-# 添加正确的模块路径，兼容开发环境和PyInstaller打包环境
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    # PyInstaller 打包后的环境
-    module_path = sys._MEIPASS
-else:
-    # 开发环境，从当前文件所在目录找到src目录
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    module_path = current_dir
+# 确保能找到core模块 - 无论在开发环境还是打包环境
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
-if module_path not in sys.path:
-    sys.path.insert(0, module_path)
-
-from core.bom_generator import BomGenerator
+# 尝试导入，如果失败则尝试其他路径
+try:
+    from core.bom_generator import BomGenerator
+except ImportError:
+    # 如果第一次导入失败，尝试添加更多路径
+    possible_paths = [
+        os.path.dirname(current_dir),  # 上级目录
+        os.path.join(os.path.dirname(current_dir), 'src'),  # src目录
+    ]
+    for path in possible_paths:
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    from core.bom_generator import BomGenerator
 
 
 class Application(tk.Tk):
