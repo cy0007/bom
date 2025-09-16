@@ -5,24 +5,8 @@ from tkinter import filedialog, messagebox
 import os
 import sys
 
-# 确保能找到core模块 - 无论在开发环境还是打包环境
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-
-# 尝试导入，如果失败则尝试其他路径
-try:
-    from core.bom_generator import BomGenerator
-except ImportError:
-    # 如果第一次导入失败，尝试添加更多路径
-    possible_paths = [
-        os.path.dirname(current_dir),  # 上级目录
-        os.path.join(os.path.dirname(current_dir), 'src'),  # src目录
-    ]
-    for path in possible_paths:
-        if path not in sys.path:
-            sys.path.insert(0, path)
-    from core.bom_generator import BomGenerator
+# 简单的导入 - 复杂的路径处理交给.spec文件
+from core.bom_generator import BomGenerator
 
 
 class Application(tk.Tk):

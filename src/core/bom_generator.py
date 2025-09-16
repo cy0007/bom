@@ -80,16 +80,9 @@ class BomGenerator:
         Note:
             Excel文件应包含复杂的多行表头结构，该方法会自动处理表头解析。
         """
-        # 简单有效的路径处理
-        if getattr(sys, 'frozen', False):
-            # 打包环境
-            base_path = sys._MEIPASS
-            self.template_path = os.path.join(base_path, 'resources', 'bom_template.xlsx')
-            self.color_codes_path = os.path.join(base_path, 'resources', 'color_codes.json')
-        else:
-            # 开发环境
-            self.template_path = 'src/resources/bom_template.xlsx'
-            self.color_codes_path = 'src/resources/color_codes.json'
+        # 使用简单的相对路径 - 复杂的路径处理交给.spec文件
+        self.template_path = 'src/resources/bom_template.xlsx'
+        self.color_codes_path = 'src/resources/color_codes.json'
         
         try:
             # 读取指定Excel文件中的"明细表"Sheet，手动处理复杂表头
