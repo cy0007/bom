@@ -3,19 +3,22 @@
 from typing import Dict, Any, List
 import pandas as pd
 import json
+import openpyxl
+import os
 
 
 class BomGenerator:
     """BOM生成器类，用于处理Excel文件并生成BOM表
     
     该类主要用于读取包含产品研发明细信息的Excel文件，
-    并提供根据款式编码查找产品信息和生成SKU的功能。
+    并提供根据款式编码查找产品信息、生成SKU以及生成完整BOM文件的功能。
     
     支持的操作：
     - 读取Excel文件中的产品明细数据
     - 根据款式编码查找对应的产品信息
     - 返回包含波段、品类、开发颜色等关键信息的结构化数据
     - 根据款式编码、开发颜色和尺码生成对应的SKU列表
+    - 基于BOM模板生成完整的Excel BOM文件，支持动态颜色数量
     
     Example:
         >>> generator = BomGenerator('product_details.xlsx')
@@ -32,6 +35,23 @@ class BomGenerator:
     CATEGORY_COL = '品类'
     DEV_COLOR_COL = '开发颜色'
     COLOR_CODES_PATH = 'src/resources/color_codes.json'
+    TEMPLATE_PATH = 'src/resources/bom_template.xlsx'
+    
+    # BOM模板单元格位置配置
+    CELL_CONFIG = {
+        'product_name': 'C4',        # 品名单元格位置
+        'color_start_row': 9,        # 第一个下单颜色的行号
+        'sku_start_row': 10,         # 第一个规格码的行号
+        'rows_per_color': 2,         # 每个颜色块占用的行数
+        'sku_columns': {             # SKU对应的列位置
+            'S': 'C',
+            'M': 'D', 
+            'L': 'E',
+            'XL': 'F'
+        },
+        'color_column': 'B',         # 颜色名称所在列
+        'insert_before_row': 15      # 需要插入新行时的基准行（工艺要求行）
+    }
     
     def __init__(self, source_path: str) -> None:
         """初始化BomGenerator实例
@@ -221,3 +241,145 @@ class BomGenerator:
             >>> print(sku)  # 输出: H5A41349215S
         """
         return f"{style_code}{color_code}{size}"
+    
+    def generate_bom_file(self, style_code: str, output_dir: str) -> None:
+        """生成完整的BOM Excel文件
+        
+        基于预定义的BOM模板，为指定的款式编码生成包含所有颜色和SKU信息的
+        完整Excel BOM文件。该方法支持动态数量的颜色，当颜色超过3种时会
+        自动插入新行来容纳额外的颜色信息。
+        
+        处理流程：
+        1. 确保输出目录存在
+        2. 加载BOM模板文件
+        3. 查找并填充产品基本信息（品名等）
+        4. 生成所有颜色的SKU信息
+        5. 如果颜色数量超过3种，动态插入新行
+        6. 填充所有颜色和SKU信息到对应位置
+        7. 保存为新的Excel文件
+        
+        Args:
+            style_code (str): 产品款式编码，如 'H5A123416'
+            output_dir (str): 输出目录的完整路径。如果目录不存在会自动创建
+            
+        Raises:
+            ValueError: 当款式编码在源数据中不存在时
+            FileNotFoundError: 当BOM模板文件不存在时
+            PermissionError: 当无法创建输出目录或写入文件时
+            
+        Example:
+            >>> generator = BomGenerator('source.xlsx')
+            >>> generator.generate_bom_file('H5A123416', './output')
+            # 将在 ./output/ 目录下生成 H5A123416.xlsx 文件
+            
+        Note:
+            - 生成的文件名格式为: {款式编码}.xlsx
+            - 支持任意数量的颜色，超过3种会自动扩展表格行数
+            - 品名格式为: HECO{波段}{品类}{款式编码}
+            - SKU生成规则: {款式编码}{颜色代码}{尺码}
+        """
+        # 1. 确保输出目录存在
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 2. 加载模板文件
+        try:
+            workbook = openpyxl.load_workbook(self.TEMPLATE_PATH)
+            sheet = workbook.active
+        except FileNotFoundError:
+            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{self.TEMPLATE_PATH}")
+        
+        # 3. 获取产品基本信息
+        style_info = self.find_style_info(style_code)
+        
+        # 4. 生成品名（HECO + 波段 + 品类 + 款式编码）
+        product_name = f"HECO{style_info[self.WAVE_COL]}{style_info[self.CATEGORY_COL]}{style_code}"
+        
+        # 5. 填充产品名称到工作表（处理合并单元格）
+        self._write_to_cell(sheet, self.CELL_CONFIG['product_name'], product_name)
+        
+        # 6. 生成SKU列表
+        dev_colors = style_info[self.DEV_COLOR_COL]
+        sizes = ['S', 'M', 'L', 'XL']
+        sku_list = self.generate_skus(style_code, dev_colors, sizes)
+        
+        # 7. 处理动态行插入（如果颜色超过3种）
+        if len(sku_list) > 3:
+            self._insert_additional_rows(sheet, len(sku_list))
+        
+        # 8. 填充所有颜色和SKU信息
+        self._fill_color_and_sku_data(sheet, sku_list)
+        
+        # 9. 保存文件
+        output_file_path = os.path.join(output_dir, f"{style_code}.xlsx")
+        try:
+            workbook.save(output_file_path)
+        except PermissionError:
+            raise PermissionError(f"错误：无法保存文件到 {output_file_path}，请检查目录权限。")
+    
+    def _write_to_cell(self, sheet, cell_address: str, value: str) -> None:
+        """向Excel单元格写入值，处理合并单元格情况
+        
+        Args:
+            sheet: openpyxl工作表对象
+            cell_address (str): 单元格地址，如 'C4'
+            value (str): 要写入的值
+        """
+        target_cell = sheet[cell_address]
+        if target_cell.__class__.__name__ == 'MergedCell':
+            # 找到包含目标单元格的合并区域的主单元格
+            for range_ in sheet.merged_cells.ranges:
+                if cell_address in range_:
+                    # 写入到合并区域的左上角单元格
+                    main_cell = sheet.cell(row=range_.min_row, column=range_.min_col)
+                    main_cell.value = value
+                    break
+            else:
+                # 如果找不到合并区域，直接写入目标单元格
+                target_cell.value = value
+        else:
+            target_cell.value = value
+    
+    def _insert_additional_rows(self, sheet, color_count: int) -> None:
+        """当颜色数量超过3种时，动态插入新行
+        
+        Args:
+            sheet: openpyxl工作表对象
+            color_count (int): 颜色总数
+        """
+        if color_count <= 3:
+            return
+        
+        # 计算需要插入的行数：每超过一种颜色需要插入2行
+        additional_colors = color_count - 3
+        rows_to_insert = additional_colors * self.CELL_CONFIG['rows_per_color']
+        
+        # 在指定位置插入新行
+        insert_row = self.CELL_CONFIG['insert_before_row']
+        sheet.insert_rows(insert_row, rows_to_insert)
+    
+    def _fill_color_and_sku_data(self, sheet, sku_list: List[Dict[str, Any]]) -> None:
+        """填充所有颜色和SKU信息到工作表
+        
+        Args:
+            sheet: openpyxl工作表对象
+            sku_list (List[Dict[str, Any]]): SKU信息列表
+        """
+        config = self.CELL_CONFIG
+        color_column = config['color_column']
+        sku_columns = config['sku_columns']
+        
+        for i, color_data in enumerate(sku_list):
+            # 计算当前颜色块的行位置
+            color_row = config['color_start_row'] + (i * config['rows_per_color'])
+            sku_row = config['sku_start_row'] + (i * config['rows_per_color'])
+            
+            # 填充颜色名称 - 使用_write_to_cell处理合并单元格
+            color_cell_address = f"{color_column}{color_row}"
+            self._write_to_cell(sheet, color_cell_address, color_data['color'])
+            
+            # 填充SKU信息 - 使用_write_to_cell处理合并单元格
+            for size, sku in color_data['skus'].items():
+                if size in sku_columns:
+                    column = sku_columns[size]
+                    sku_cell_address = f"{column}{sku_row}"
+                    self._write_to_cell(sheet, sku_cell_address, sku)
