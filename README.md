@@ -156,10 +156,41 @@ pyinstaller --onefile --windowed --add-data "src/resources;resources" src/main.p
 - ✅ 完善文档说明：详细的使用指南和部署说明
 
 **最终交付方案：**
-- 🚀 **推荐使用**：双击 `启动BOM生成工具.bat` 一键启动
+- ⭐ **独立exe文件**：`dist/BOM_Generator_v1.0.exe` - 无需Python环境，双击即可运行
+- 🚀 **推荐备选**：双击 `启动BOM生成工具.bat` 一键启动
 - 📁 **单文件版本**：`python BOM_Generator_v1.0.py` 
 - 🔧 **开发版本**：`python src/main.py`
-- 📦 **可选exe打包**：如环境支持PyInstaller可自行打包
+
+## PyInstaller打包说明
+
+### 成功的打包配置
+
+经过深度诊断和优化，项目已成功解决PyInstaller打包问题：
+
+**核心解决方案：**
+1. **代码简化**：移除复杂的动态路径处理，使用简单相对路径
+2. **精确配置**：使用`.spec`文件精确控制打包参数
+3. **依赖优化**：排除大型非必需科学计算库
+
+**打包命令：**
+```bash
+# 生成/编辑.spec文件
+pyinstaller --name BOM_Generator_v1.0 --windowed --specpath . src/main.py
+
+# 使用配置好的.spec文件打包
+pyinstaller BOM_Generator_v1.0.spec
+```
+
+**关键配置参数：**
+- `pathex=['src']`：指定模块搜索路径
+- `datas=[('src/resources', 'resources')]`：包含资源文件
+- `excludes=['matplotlib', 'scipy', 'numpy']`：排除大型依赖
+- `upx=False`：禁用压缩避免兼容性问题
+
+**生成结果：**
+- 文件大小：约48MB
+- 启动方式：双击`dist/BOM_Generator_v1.0.exe`即可运行
+- 运行环境：无需安装Python或任何依赖库
 
 **功能验证：**
 - ✅ 所有核心BOM生成功能正常运行
@@ -171,4 +202,4 @@ pyinstaller --onefile --windowed --add-data "src/resources;resources" src/main.p
 🎉 **项目成功交付！** BOM生成工具功能完整，提供多种稳定的运行方式。
 
 ---
-最后更新时间: 2025-09-16
+最后更新时间: 2025-09-17 (成功解决PyInstaller打包问题)
