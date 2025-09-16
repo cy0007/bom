@@ -5,7 +5,20 @@ import pandas as pd
 import json
 import openpyxl
 import os
+import sys
 from datetime import datetime
+
+
+def resource_path(relative_path):
+    """ 获取资源的绝对路径，兼容开发环境和PyInstaller打包环境 """
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # PyInstaller 打包后的路径
+        base_path = sys._MEIPASS
+    else:
+        # 开发环境下的路径，指向 src 目录
+        base_path = os.path.abspath("src")
+
+    return os.path.join(base_path, 'resources', relative_path)
 
 
 class BomGenerator:
@@ -35,8 +48,6 @@ class BomGenerator:
     WAVE_COL = '波段'
     CATEGORY_COL = '品类'
     DEV_COLOR_COL = '开发颜色'
-    COLOR_CODES_PATH = 'src/resources/color_codes.json'
-    TEMPLATE_PATH = 'src/resources/bom_template.xlsx'
     
     # BOM模板单元格位置配置
     CELL_CONFIG = {
@@ -81,6 +92,10 @@ class BomGenerator:
         Note:
             Excel文件应包含复杂的多行表头结构，该方法会自动处理表头解析。
         """
+        # 设置资源文件路径，兼容开发环境和打包环境
+        self.template_path = resource_path('bom_template.xlsx')
+        self.color_codes_path = resource_path('color_codes.json')
+        
         try:
             # 读取指定Excel文件中的"明细表"Sheet，手动处理复杂表头
             temp_df = pd.read_excel(source_path, sheet_name=self.SHEET_NAME, header=1)
@@ -100,10 +115,10 @@ class BomGenerator:
             
             # 加载颜色代码映射表
             try:
-                with open(self.COLOR_CODES_PATH, 'r', encoding='utf-8') as f:
+                with open(self.color_codes_path, 'r', encoding='utf-8') as f:
                     self.color_codes = json.load(f)
             except FileNotFoundError:
-                raise FileNotFoundError(f"错误：颜色代码文件未找到，路径：{self.COLOR_CODES_PATH}")
+                raise FileNotFoundError(f"错误：颜色代码文件未找到，路径：{self.color_codes_path}")
             except json.JSONDecodeError as e:
                 raise ValueError(f"错误：颜色代码文件格式不正确：{str(e)}")
                 
@@ -295,10 +310,10 @@ class BomGenerator:
         
         # 2. 加载模板文件
         try:
-            workbook = openpyxl.load_workbook(self.TEMPLATE_PATH)
+            workbook = openpyxl.load_workbook(self.template_path)
             sheet = workbook.active
         except FileNotFoundError:
-            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{self.TEMPLATE_PATH}")
+            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{self.template_path}")
         
         # 3. 获取产品基本信息
         style_info = self.find_style_info(style_code)

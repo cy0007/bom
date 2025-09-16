@@ -43,7 +43,62 @@ BOM生成工具是一个专业的Windows桌面应用程序，旨在帮助用户�
 
 ## 使用方法
 
-（功能开发完成后更新）
+### 运行程序
+1. 双击 `dist/BOM_Generator_v1.0.exe` 启动应用程序
+2. 点击"选择..."按钮选择源Excel文件（包含产品明细数据）
+3. 点击"选择..."按钮选择输出文件夹
+4. 点击"开始生成"按钮自动生成所有款式的BOM文件
+
+### 输入文件要求
+- Excel格式（.xlsx）
+- 包含名为"明细表"的工作表
+- 必须包含以下列：款式编码、波段、品类、开发颜色
+
+### 输出结果
+- 为每个款式编码生成独立的BOM Excel文件
+- 文件名格式：{款式编码}.xlsx
+- 自动填充品名、颜色信息、SKU等
+
+## 构建说明
+
+### 开发环境运行
+```bash
+# 直接运行Python脚本
+python src/main.py
+```
+
+### 打包为独立exe文件
+
+1. **安装PyInstaller**
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. **执行打包命令**
+   ```bash
+   pyinstaller --name BOM_Generator_v1.0 --onefile --windowed --add-data "src/resources;resources" src/main.py
+   ```
+
+3. **命令参数说明**
+   - `--name BOM_Generator_v1.0`: 指定生成的exe文件名
+   - `--onefile`: 打包成单个可执行文件
+   - `--windowed`: GUI应用，不显示控制台窗口
+   - `--add-data "src/resources;resources"`: 包含资源文件（模板和颜色代码）
+
+4. **输出文件**
+   - 可执行文件：`dist/BOM_Generator_v1.0.exe`
+   - 文件大小：约10.7 MB
+   - 支持独立运行，无需安装Python环境
+
+### 重新构建
+如需重新构建，先清理之前的构建文件：
+```bash
+# PowerShell
+Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+
+# 然后重新执行打包命令
+pyinstaller --name BOM_Generator_v1.0 --onefile --windowed --add-data "src/resources;resources" src/main.py
+```
 
 ## 开发规范
 
@@ -85,6 +140,26 @@ BOM生成工具是一个专业的Windows桌面应用程序，旨在帮助用户�
 - 颜色名称（白色、黑色、杏色等）正确显示在A8、A11、A14单元格
 - 颜色名称所在行没有任何错误的单元格合并
 - 产品核心功能已完美实现
+
+### 2025-09-16 产品打包与交付
+- ✅ 安装PyInstaller打包工具
+- ✅ 修复模块导入路径问题：添加sys.path调整和资源文件路径适配
+- ✅ 修复资源文件访问问题：实现resource_path函数兼容开发和打包环境
+- ✅ 解决开发环境兼容性：使用`getattr(sys, 'frozen', False)`标准方法判断运行环境
+- ✅ 优化路径处理逻辑：开发环境使用`os.path.abspath("src")`，打包环境使用`sys._MEIPASS`
+- ✅ 修复main.py模块导入：实现与bom_generator.py一致的路径处理策略
+- ✅ 成功打包为独立exe文件：BOM_Generator_v1.0.exe (10.7 MB)
+- ✅ 全面验证通过：开发环境正常，打包环境正常，构建质量良好
+- ✅ 完善构建说明文档：详细记录最终版PyInstaller打包命令
+
+**最终交付物验证：**
+- ✅ 开发环境：`python src/main.py` 正常启动和运行
+- ✅ 打包环境：独立exe文件完美启动，无任何错误
+- ✅ 资源文件：模板和颜色代码正确打包并可访问
+- ✅ 跨环境兼容：无需Python环境即可在Windows系统上使用
+- ✅ 功能完整性：所有BOM生成功能验证通过
+
+🎉 **项目完美交付！** BOM生成工具已成功开发、调试并完美打包交付。
 
 ---
 最后更新时间: 2025-09-16
