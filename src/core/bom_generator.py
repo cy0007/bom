@@ -52,15 +52,15 @@ class BomGenerator:
     # 预设颜色块的精确位置映射配置（非均匀布局）
     PRESET_COLOR_BLOCKS = [
         {   # 第1个颜色块的位置映射
-            'color_cell': 'D8',     # '下单颜色' 所在的单元格
+            'color_cell': 'A8',     # '下单颜色' 所在的单元格
             'sku_row': 6            # 该颜色对应的 '规格码' 所在的行号
         },
         {   # 第2个颜色块的位置映射
-            'color_cell': 'D11',
+            'color_cell': 'A11',
             'sku_row': 9
         },
         {   # 第3个颜色块的位置映射
-            'color_cell': 'D14',
+            'color_cell': 'A14',
             'sku_row': 12
         }
     ]
@@ -345,15 +345,6 @@ class BomGenerator:
                 
                 # 1. 写入颜色名称
                 self._write_to_cell(sheet, color_cell_addr, color_info['color'])
-                
-                # 根据需要合并从D到G列的单元格
-                color_row = sheet[color_cell_addr].row
-                try:
-                    merge_range = f"D{color_row}:G{color_row}"
-                    sheet.merge_cells(merge_range)
-                except ValueError:
-                    # 如果单元格已经合并，忽略错误
-                    pass
                 
                 # 2. 写入规格码 (SKU) - 使用精确的行号和列号
                 # SKU从B列开始，行号由 sku_target_row 决定
