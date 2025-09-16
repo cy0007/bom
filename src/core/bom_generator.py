@@ -5,6 +5,7 @@ import pandas as pd
 import json
 import openpyxl
 import os
+from datetime import datetime
 
 
 class BomGenerator:
@@ -39,10 +40,16 @@ class BomGenerator:
     
     # BOM模板单元格位置配置
     CELL_CONFIG = {
-        'product_name': 'C4',        # 品名单元格位置
-        'color_start_row': 9,        # 第一个下单颜色的行号
-        'sku_start_row': 10,         # 第一个规格码的行号
-        'rows_per_color': 2,         # 每个颜色块占用的行数
+        # 静态/半静态字段位置
+        'timestamp': 'J2',           # 当前时间
+        'style_code': 'B3',          # 款式编码
+        'order_type': 'E3',          # 订单类型（固定"首单"）
+        'product_name_b4': 'B4',     # 品名（B4位置）
+        'wave_info': 'E4',           # 波段信息
+        'category_info': 'J4',       # 品类信息
+        
+        # 颜色和SKU填充配置
+        'color_rows': [8, 11, 13],   # 下单颜色的行号（不均匀分布）
         'sku_columns': {             # SKU对应的列位置
             'S': 'C',
             'M': 'D', 
@@ -50,7 +57,8 @@ class BomGenerator:
             'XL': 'F'
         },
         'color_column': 'B',         # 颜色名称所在列
-        'insert_before_row': 15      # 需要插入新行时的基准行（工艺要求行）
+        'color_merge_end': 'G',      # 颜色单元格合并的结束列
+        'insert_before_row': 15      # 需要插入新行时的基准行
     }
     
     def __init__(self, source_path: str) -> None:
@@ -294,8 +302,27 @@ class BomGenerator:
         # 4. 生成品名（HECO + 波段 + 品类 + 款式编码）
         product_name = f"HECO{style_info[self.WAVE_COL]}{style_info[self.CATEGORY_COL]}{style_code}"
         
-        # 5. 填充产品名称到工作表（处理合并单元格）
-        self._write_to_cell(sheet, self.CELL_CONFIG['product_name'], product_name)
+        # 5. 填充静态/半静态字段内容
+        config = self.CELL_CONFIG
+        
+        # 当前时间格式化为 YYYY/MM/DD HH:MM
+        current_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+        self._write_to_cell(sheet, config['timestamp'], current_time)
+        
+        # 款式编码
+        self._write_to_cell(sheet, config['style_code'], style_code)
+        
+        # 固定写入 "首单"
+        self._write_to_cell(sheet, config['order_type'], "首单")
+        
+        # 品名（B4位置）
+        self._write_to_cell(sheet, config['product_name_b4'], product_name)
+        
+        # 波段信息
+        self._write_to_cell(sheet, config['wave_info'], style_info[self.WAVE_COL])
+        
+        # 品类信息
+        self._write_to_cell(sheet, config['category_info'], style_info[self.CATEGORY_COL])
         
         # 6. 生成SKU列表
         dev_colors = style_info[self.DEV_COLOR_COL]
@@ -307,7 +334,7 @@ class BomGenerator:
             self._insert_additional_rows(sheet, len(sku_list))
         
         # 8. 填充所有颜色和SKU信息
-        self._fill_color_and_sku_data(sheet, sku_list)
+        self._fill_color_and_sku_data_precise(sheet, sku_list)
         
         # 9. 保存文件
         output_file_path = os.path.join(output_dir, f"{style_code}.xlsx")
@@ -349,9 +376,9 @@ class BomGenerator:
         if color_count <= 3:
             return
         
-        # 计算需要插入的行数：每超过一种颜色需要插入2行
+        # 计算需要插入的行数：每超过一种颜色需要插入3行（颜色行+SKU行+空行）
         additional_colors = color_count - 3
-        rows_to_insert = additional_colors * self.CELL_CONFIG['rows_per_color']
+        rows_to_insert = additional_colors * 3
         
         # 在指定位置插入新行
         insert_row = self.CELL_CONFIG['insert_before_row']
@@ -378,6 +405,52 @@ class BomGenerator:
             self._write_to_cell(sheet, color_cell_address, color_data['color'])
             
             # 填充SKU信息 - 使用_write_to_cell处理合并单元格
+            for size, sku in color_data['skus'].items():
+                if size in sku_columns:
+                    column = sku_columns[size]
+                    sku_cell_address = f"{column}{sku_row}"
+                    self._write_to_cell(sheet, sku_cell_address, sku)
+    
+    def _fill_color_and_sku_data_precise(self, sheet, sku_list: List[Dict[str, Any]]) -> None:
+        """精确填充所有颜色和SKU信息到工作表，完全匹配标准模板布局
+        
+        Args:
+            sheet: openpyxl工作表对象
+            sku_list (List[Dict[str, Any]]): SKU信息列表
+        """
+        config = self.CELL_CONFIG
+        color_column = config['color_column']
+        color_merge_end = config['color_merge_end']
+        sku_columns = config['sku_columns']
+        color_rows = config['color_rows']  # [8, 11, 13] - 预定义的颜色行号
+        
+        for i, color_data in enumerate(sku_list):
+            # 确定当前颜色的行号
+            if i < len(color_rows):
+                # 使用预定义的行号
+                color_row = color_rows[i]
+            else:
+                # 超过预定义数量，需要计算额外插入的行号
+                # 基于最后一个预定义行号，每个额外颜色增加3行间距
+                extra_colors = i - len(color_rows) + 1
+                color_row = color_rows[-1] + (extra_colors * 3)
+            
+            # 规格码行号是颜色行号的下一行
+            sku_row = color_row + 1
+            
+            # 填充颜色名称并合并单元格
+            color_cell_address = f"{color_column}{color_row}"
+            self._write_to_cell(sheet, color_cell_address, color_data['color'])
+            
+            # 合并单元格：从B列到G列
+            merge_range = f"{color_column}{color_row}:{color_merge_end}{color_row}"
+            try:
+                sheet.merge_cells(merge_range)
+            except ValueError:
+                # 如果单元格已经合并，忽略错误
+                pass
+            
+            # 填充SKU信息到规格码行
             for size, sku in color_data['skus'].items():
                 if size in sku_columns:
                     column = sku_columns[size]
