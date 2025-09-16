@@ -47,19 +47,14 @@ class BomGenerator:
         'product_name_b4': 'B4',     # 品名（B4位置）
         'wave_info': 'E4',           # 波段信息
         'category_info': 'J4',       # 品类信息
-        
-        # 颜色和SKU填充配置
-        'color_rows': [8, 11, 13],   # 下单颜色的行号（不均匀分布）
-        'sku_columns': {             # SKU对应的列位置
-            'S': 'C',
-            'M': 'D', 
-            'L': 'E',
-            'XL': 'F'
-        },
-        'color_column': 'B',         # 颜色名称所在列
-        'color_merge_end': 'G',      # 颜色单元格合并的结束列
-        'insert_before_row': 15      # 需要插入新行时的基准行
     }
+    
+    # 预设颜色块的精确位置配置（前3个颜色块）
+    PRESET_COLOR_BLOCKS = [
+        {'color_cell': 'D8', 'sku_start_cell': 'B9'},    # 第1个颜色块的位置
+        {'color_cell': 'D11', 'sku_start_cell': 'B12'},   # 第2个颜色块的位置
+        {'color_cell': 'A13', 'sku_start_cell': 'B13'}    # 第3个颜色块的位置（颜色名称在A13，避免与SKU冲突）
+    ]
     
     def __init__(self, source_path: str) -> None:
         """初始化BomGenerator实例
@@ -329,12 +324,33 @@ class BomGenerator:
         sizes = ['S', 'M', 'L', 'XL']
         sku_list = self.generate_skus(style_code, dev_colors, sizes)
         
-        # 7. 处理动态行插入（如果颜色超过3种）
-        if len(sku_list) > 3:
-            self._insert_additional_rows(sheet, len(sku_list))
-        
-        # 8. 填充所有颜色和SKU信息
-        self._fill_color_and_sku_data_precise(sheet, sku_list)
+        # 7. 使用预设颜色块位置填充颜色和SKU信息（最多处理前3个颜色）
+        for i, color_info in enumerate(sku_list):
+            if i >= len(self.PRESET_COLOR_BLOCKS):
+                break  # 暂时不处理超过3个的颜色
+            
+            try:
+                block_config = self.PRESET_COLOR_BLOCKS[i]
+                color_cell_addr = block_config['color_cell']
+                sku_start_cell_addr = block_config['sku_start_cell']
+                
+                # 写入颜色名称
+                self._write_to_cell(sheet, color_cell_addr, color_info['color'])
+                
+                # 写入SKU信息
+                start_cell = sheet[sku_start_cell_addr]
+                start_row = start_cell.row
+                start_col = start_cell.column
+                
+                # 写入S, M, L, XL的SKU到连续的列
+                sheet.cell(row=start_row, column=start_col).value = color_info['skus']['S']
+                sheet.cell(row=start_row, column=start_col + 1).value = color_info['skus']['M']
+                sheet.cell(row=start_row, column=start_col + 2).value = color_info['skus']['L']
+                sheet.cell(row=start_row, column=start_col + 3).value = color_info['skus']['XL']
+                
+            except Exception as e:
+                # 提供详细的错误信息
+                raise ValueError(f"填充第{i+1}个颜色块时出错 (颜色: {color_info['color']}): {str(e)}")
         
         # 9. 保存文件
         output_file_path = os.path.join(output_dir, f"{style_code}.xlsx")
