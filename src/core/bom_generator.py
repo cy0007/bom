@@ -43,17 +43,26 @@ class BomGenerator:
         # 静态/半静态字段位置
         'timestamp': 'J2',           # 当前时间
         'style_code': 'B3',          # 款式编码
-        'order_type': 'E3',          # 订单类型（固定"首单"）
+        'order_type': 'F3',          # 订单类型（固定"首单"）
         'product_name_b4': 'B4',     # 品名（B4位置）
-        'wave_info': 'E4',           # 波段信息
+        'wave_info': 'F4',           # 波段信息
         'category_info': 'J4',       # 品类信息
     }
     
-    # 预设颜色块的精确位置配置（前3个颜色块）
+    # 预设颜色块的精确位置映射配置（非均匀布局）
     PRESET_COLOR_BLOCKS = [
-        {'color_cell': 'D8', 'sku_start_cell': 'B9'},    # 第1个颜色块的位置
-        {'color_cell': 'D11', 'sku_start_cell': 'B12'},   # 第2个颜色块的位置
-        {'color_cell': 'A13', 'sku_start_cell': 'B13'}    # 第3个颜色块的位置（颜色名称在A13，避免与SKU冲突）
+        {   # 第1个颜色块的位置映射
+            'color_cell': 'D8',     # '下单颜色' 所在的单元格
+            'sku_row': 6            # 该颜色对应的 '规格码' 所在的行号
+        },
+        {   # 第2个颜色块的位置映射
+            'color_cell': 'D11',
+            'sku_row': 9
+        },
+        {   # 第3个颜色块的位置映射
+            'color_cell': 'D14',
+            'sku_row': 12
+        }
     ]
     
     def __init__(self, source_path: str) -> None:
@@ -324,7 +333,7 @@ class BomGenerator:
         sizes = ['S', 'M', 'L', 'XL']
         sku_list = self.generate_skus(style_code, dev_colors, sizes)
         
-        # 7. 使用预设颜色块位置填充颜色和SKU信息（最多处理前3个颜色）
+        # 7. 使用精确位置映射填充颜色和SKU信息（最多处理前3个颜色）
         for i, color_info in enumerate(sku_list):
             if i >= len(self.PRESET_COLOR_BLOCKS):
                 break  # 暂时不处理超过3个的颜色
@@ -332,21 +341,26 @@ class BomGenerator:
             try:
                 block_config = self.PRESET_COLOR_BLOCKS[i]
                 color_cell_addr = block_config['color_cell']
-                sku_start_cell_addr = block_config['sku_start_cell']
+                sku_target_row = block_config['sku_row']
                 
-                # 写入颜色名称
+                # 1. 写入颜色名称
                 self._write_to_cell(sheet, color_cell_addr, color_info['color'])
                 
-                # 写入SKU信息
-                start_cell = sheet[sku_start_cell_addr]
-                start_row = start_cell.row
-                start_col = start_cell.column
+                # 根据需要合并从D到G列的单元格
+                color_row = sheet[color_cell_addr].row
+                try:
+                    merge_range = f"D{color_row}:G{color_row}"
+                    sheet.merge_cells(merge_range)
+                except ValueError:
+                    # 如果单元格已经合并，忽略错误
+                    pass
                 
-                # 写入S, M, L, XL的SKU到连续的列
-                sheet.cell(row=start_row, column=start_col).value = color_info['skus']['S']
-                sheet.cell(row=start_row, column=start_col + 1).value = color_info['skus']['M']
-                sheet.cell(row=start_row, column=start_col + 2).value = color_info['skus']['L']
-                sheet.cell(row=start_row, column=start_col + 3).value = color_info['skus']['XL']
+                # 2. 写入规格码 (SKU) - 使用精确的行号和列号
+                # SKU从B列开始，行号由 sku_target_row 决定
+                sheet.cell(row=sku_target_row, column=2).value = color_info['skus']['S']  # B列
+                sheet.cell(row=sku_target_row, column=3).value = color_info['skus']['M']  # C列
+                sheet.cell(row=sku_target_row, column=4).value = color_info['skus']['L']  # D列
+                sheet.cell(row=sku_target_row, column=5).value = color_info['skus']['XL'] # E列
                 
             except Exception as e:
                 # 提供详细的错误信息
