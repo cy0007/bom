@@ -1,12 +1,13 @@
 # 核心逻辑，处理并生成文件
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 import pandas as pd
 import json
 import openpyxl
 import os
 import sys
 from datetime import datetime
+import io
 
 
 class BomGenerator:
@@ -64,14 +65,14 @@ class BomGenerator:
         }
     ]
     
-    def __init__(self, source_path: str) -> None:
+    def __init__(self, source_path: Union[str, io.BytesIO]) -> None:
         """初始化BomGenerator实例
         
-        读取指定的Excel文件，解析产品明细数据并存储在内存中供后续查询使用。
+        读取指定的Excel文件或字节流，解析产品明细数据并存储在内存中供后续查询使用。
         Excel文件需要包含"明细表"工作表，且具有特定的表头结构。
         
         Args:
-            source_path (str): 源Excel文件的完整路径
+            source_path (Union[str, io.BytesIO]): 源Excel文件的完整路径或字节流对象
             
         Raises:
             FileNotFoundError: 当指定的Excel文件不存在时
@@ -85,7 +86,7 @@ class BomGenerator:
         self.color_codes_path = 'src/resources/color_codes.json'
         
         try:
-            # 读取指定Excel文件中的"明细表"Sheet，手动处理复杂表头
+            # 读取指定Excel文件或字节流中的"明细表"Sheet，手动处理复杂表头
             temp_df = pd.read_excel(source_path, sheet_name=self.SHEET_NAME, header=1)
             
             # 使用第0行（现在是DataFrame的第一行）作为列名
@@ -160,6 +161,17 @@ class BomGenerator:
             self.CATEGORY_COL: row[self.CATEGORY_COL],
             self.DEV_COLOR_COL: row[self.DEV_COLOR_COL]
         }
+    
+    def get_all_style_codes(self) -> list:
+        """
+        获取源文件中所有不为空且唯一的款式编码。
+
+        :return: 一个包含所有款式编码字符串的列表。
+        """
+        if self.STYLE_CODE_COL in self.df.columns:
+            return self.df[self.STYLE_CODE_COL].dropna().unique().tolist()
+        else:
+            raise ValueError(f"错误：源文件中未找到列 '{self.STYLE_CODE_COL}'。")
     
     def generate_skus(self, style_code: str, dev_colors_str: str, sizes: List[str]) -> List[Dict[str, Any]]:
         """根据款式编码、开发颜色和尺码生成SKU列表
@@ -366,6 +378,104 @@ class BomGenerator:
             workbook.save(output_file_path)
         except PermissionError:
             raise PermissionError(f"错误：无法保存文件到 {output_file_path}，请检查目录权限。")
+    
+    def generate_bom_file_to_buffer(self, style_code: str) -> bytes:
+        """
+        生成单个BOM Excel文件，并将其作为字节流返回。
+        
+        基于预定义的BOM模板，为指定的款式编码生成包含所有颜色和SKU信息的
+        完整Excel BOM文件，并返回文件的字节内容而不是保存到磁盘。
+        
+        Args:
+            style_code (str): 产品款式编码，如 'H5A123416'
+            
+        Returns:
+            bytes: Excel文件的字节内容
+            
+        Raises:
+            ValueError: 当款式编码在源数据中不存在时
+            FileNotFoundError: 当BOM模板文件不存在时
+            
+        Example:
+            >>> generator = BomGenerator('source.xlsx')
+            >>> excel_bytes = generator.generate_bom_file_to_buffer('H5A123416')
+            >>> len(excel_bytes)  # 返回文件字节长度
+            
+        Note:
+            - 支持任意数量的颜色，超过3种会自动扩展表格行数
+            - 品名格式为: HECO{波段}{品类}{款式编码}
+            - SKU生成规则: {款式编码}{颜色代码}{尺码}
+        """
+        # 1. 加载模板文件
+        try:
+            workbook = openpyxl.load_workbook(self.template_path)
+            sheet = workbook.active
+        except FileNotFoundError:
+            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{self.template_path}")
+        
+        # 2. 获取产品基本信息
+        style_info = self.find_style_info(style_code)
+        
+        # 3. 生成品名（HECO + 波段 + 品类 + 款式编码）
+        product_name = f"HECO{style_info[self.WAVE_COL]}{style_info[self.CATEGORY_COL]}{style_code}"
+        
+        # 4. 填充静态/半静态字段内容
+        config = self.CELL_CONFIG
+        
+        # 当前时间格式化为 YYYY/MM/DD HH:MM
+        current_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+        self._write_to_cell(sheet, config['timestamp'], current_time)
+        
+        # 款式编码
+        self._write_to_cell(sheet, config['style_code'], style_code)
+        
+        # 固定写入 "首单"
+        self._write_to_cell(sheet, config['order_type'], "首单")
+        
+        # 品名（B4位置）
+        self._write_to_cell(sheet, config['product_name_b4'], product_name)
+        
+        # 波段信息
+        self._write_to_cell(sheet, config['wave_info'], style_info[self.WAVE_COL])
+        
+        # 品类信息
+        self._write_to_cell(sheet, config['category_info'], style_info[self.CATEGORY_COL])
+        
+        # 5. 生成SKU列表
+        dev_colors = style_info[self.DEV_COLOR_COL]
+        sizes = ['S', 'M', 'L', 'XL']
+        sku_list = self.generate_skus(style_code, dev_colors, sizes)
+        
+        # 6. 使用精确位置映射填充颜色和SKU信息（最多处理前3个颜色）
+        for i, color_info in enumerate(sku_list):
+            if i >= len(self.PRESET_COLOR_BLOCKS):
+                break  # 暂时不处理超过3个的颜色
+            
+            try:
+                block_config = self.PRESET_COLOR_BLOCKS[i]
+                color_cell_addr = block_config['color_cell']
+                sku_target_row = block_config['sku_row']
+                
+                # 1. 写入颜色名称
+                self._write_to_cell(sheet, color_cell_addr, color_info['color'])
+                
+                # 2. 写入规格码 (SKU) - 使用精确的行号和列号
+                # SKU从B列开始，行号由 sku_target_row 决定
+                sheet.cell(row=sku_target_row, column=2).value = color_info['skus']['S']  # B列
+                sheet.cell(row=sku_target_row, column=3).value = color_info['skus']['M']  # C列
+                sheet.cell(row=sku_target_row, column=4).value = color_info['skus']['L']  # D列
+                sheet.cell(row=sku_target_row, column=5).value = color_info['skus']['XL'] # E列
+                
+            except Exception as e:
+                # 提供详细的错误信息
+                raise ValueError(f"填充第{i+1}个颜色块时出错 (颜色: {color_info['color']}): {str(e)}")
+        
+        # 7. 将工作簿保存在内存中的字节流中
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)  # 将指针移回开头
+        
+        return buffer.getvalue()
     
     def _write_to_cell(self, sheet, cell_address: str, value: str) -> None:
         """向Excel单元格写入值，处理合并单元格情况
