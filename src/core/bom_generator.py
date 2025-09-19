@@ -10,6 +10,19 @@ from datetime import datetime
 import io
 
 
+def resource_path(relative_path: str) -> str:
+    """
+    构建资源文件的完整路径。
+    
+    Args:
+        relative_path (str): 相对于resources目录的路径，如 'category_mapping.json' 或 'templates/上衣模板.xlsx'
+        
+    Returns:
+        str: 完整的资源文件路径
+    """
+    return f"src/resources/{relative_path}"
+
+
 class BomGenerator:
     """BOM生成器类，用于处理Excel文件并生成BOM表
     
@@ -46,7 +59,8 @@ class BomGenerator:
         'order_type': 'F3',          # 订单类型（固定"首单"）
         'product_name_b4': 'B4',     # 品名（B4位置）
         'wave_info': 'F4',           # 波段信息
-        'category_info': 'J4',       # 品类信息
+        'primary_category': 'J4',    # 一级品类信息
+        'secondary_category': 'J5',  # 二级品类信息
     }
     
     # 预设颜色块的精确位置映射配置（非均匀布局）
@@ -110,6 +124,16 @@ class BomGenerator:
                 raise FileNotFoundError(f"错误：颜色代码文件未找到，路径：{self.color_codes_path}")
             except json.JSONDecodeError as e:
                 raise ValueError(f"错误：颜色代码文件格式不正确：{str(e)}")
+            
+            # 加载品类映射
+            self.category_mapping_path = 'src/resources/category_mapping.json'
+            try:
+                with open(self.category_mapping_path, 'r', encoding='utf-8') as f:
+                    self.category_mapping = json.load(f)
+            except FileNotFoundError:
+                raise FileNotFoundError("错误：品类映射文件 'category_mapping.json' 未找到。")
+            except json.JSONDecodeError:
+                raise ValueError("错误：品类映射文件 'category_mapping.json' 格式不正确。")
                 
         except FileNotFoundError as e:
             if "颜色代码文件" in str(e):
@@ -340,9 +364,6 @@ class BomGenerator:
         # 波段信息
         self._write_to_cell(sheet, config['wave_info'], style_info[self.WAVE_COL])
         
-        # 品类信息
-        self._write_to_cell(sheet, config['category_info'], style_info[self.CATEGORY_COL])
-        
         # 6. 生成SKU列表
         dev_colors = style_info[self.DEV_COLOR_COL]
         sizes = ['S', 'M', 'L', 'XL']
@@ -383,7 +404,7 @@ class BomGenerator:
         """
         生成单个BOM Excel文件，并将其作为字节流返回。
         
-        基于预定义的BOM模板，为指定的款式编码生成包含所有颜色和SKU信息的
+        基于动态选择的BOM模板，为指定的款式编码生成包含所有颜色和SKU信息的
         完整Excel BOM文件，并返回文件的字节内容而不是保存到磁盘。
         
         Args:
@@ -393,7 +414,7 @@ class BomGenerator:
             bytes: Excel文件的字节内容
             
         Raises:
-            ValueError: 当款式编码在源数据中不存在时
+            ValueError: 当款式编码在源数据中不存在时或未定义的品类时
             FileNotFoundError: 当BOM模板文件不存在时
             
         Example:
@@ -405,18 +426,36 @@ class BomGenerator:
             - 支持任意数量的颜色，超过3种会自动扩展表格行数
             - 品名格式为: HECO{波段}{品类}{款式编码}
             - SKU生成规则: {款式编码}{颜色代码}{尺码}
+            - 动态选择模板：根据二级品类映射到一级品类，选择对应模板
         """
-        # 1. 加载模板文件
-        try:
-            workbook = openpyxl.load_workbook(self.template_path)
-            sheet = workbook.active
-        except FileNotFoundError:
-            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{self.template_path}")
-        
-        # 2. 获取产品基本信息
+        # 1. 获取产品基本信息
         style_info = self.find_style_info(style_code)
         
-        # 3. 生成品名（HECO + 波段 + 品类 + 款式编码）
+        # 2. 动态模板选择逻辑
+        # a. 获取当前处理款式的二级品类（secondary_category）
+        secondary_category = style_info[self.CATEGORY_COL]
+        
+        # b. 使用self.category_mapping字典，根据secondary_category查找对应的一级品类（primary_category）
+        if secondary_category not in self.category_mapping:
+            raise ValueError(f"错误：未定义的品类 '{secondary_category}'，请在category_mapping.json中配置。")
+        
+        primary_category = self.category_mapping[secondary_category]
+        
+        # c. 根据primary_category构建模板文件的路径
+        template_path = resource_path(f'templates/{primary_category}模板.xlsx')
+        
+        # d. 加载这个动态确定的模板文件
+        try:
+            workbook = openpyxl.load_workbook(template_path)
+            sheet = workbook.active
+        except FileNotFoundError:
+            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{template_path}")
+        
+        # 3. 填充一级品类和二级品类
+        sheet['J4'] = primary_category
+        sheet['J5'] = secondary_category
+        
+        # 4. 生成品名（HECO + 波段 + 品类 + 款式编码）
         product_name = f"HECO{style_info[self.WAVE_COL]}{style_info[self.CATEGORY_COL]}{style_code}"
         
         # 4. 填充静态/半静态字段内容
@@ -437,9 +476,6 @@ class BomGenerator:
         
         # 波段信息
         self._write_to_cell(sheet, config['wave_info'], style_info[self.WAVE_COL])
-        
-        # 品类信息
-        self._write_to_cell(sheet, config['category_info'], style_info[self.CATEGORY_COL])
         
         # 5. 生成SKU列表
         dev_colors = style_info[self.DEV_COLOR_COL]

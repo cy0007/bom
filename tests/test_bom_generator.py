@@ -364,3 +364,100 @@ def test_generate_bom_file_to_buffer():
     # 4. 验证文件大小合理（应该大于某个最小值）
     min_expected_size = 5000  # 至少5KB
     assert len(excel_bytes) > min_expected_size, f"Excel文件大小应该大于 {min_expected_size} 字节，实际大小: {len(excel_bytes)}"
+
+
+def test_template_selection_and_category_filling():
+    """测试模板动态选择和品类填充功能（TDD）"""
+    
+    # 定义测试用的源文件路径
+    source_file = 'tests/fixtures/新品研发明细表-最终版.xlsx'
+    
+    # 实例化 BomGenerator 类
+    generator = BomGenerator(source_file)
+    
+    # 模拟一个"品类"为"马面裙"的款式信息，用于测试动态模板选择
+    mock_style_info = {
+        '波段': '秋四波',
+        '品类': '马面裙',  # 二级品类：马面裙，应该映射到一级品类：半身裙
+        '开发颜色': '白色'
+    }
+    
+    # 定义模拟的款式编码
+    test_style_code = 'TEST123456'
+    
+    # 使用patch模拟find_style_info方法的返回值
+    with patch.object(generator, 'find_style_info', return_value=mock_style_info):
+        # 调用generate_bom_file_to_buffer方法
+        excel_bytes = generator.generate_bom_file_to_buffer(test_style_code)
+    
+    # 验证返回的Excel文件内容
+    import io
+    excel_buffer = io.BytesIO(excel_bytes)
+    
+    try:
+        workbook = openpyxl.load_workbook(excel_buffer)
+        sheet = workbook.active
+        
+        # 断言：验证一级品类(J4)是否为"半身裙"
+        assert sheet['J4'].value == '半身裙', f"J4单元格应该包含一级品类 '半身裙'，实际值: {sheet['J4'].value}"
+        
+        # 断言：验证二级品类(J5)是否为"马面裙"
+        assert sheet['J5'].value == '马面裙', f"J5单元格应该包含二级品类 '马面裙'，实际值: {sheet['J5'].value}"
+        
+        print("✅ 模板动态选择和品类填充测试通过")
+        
+        # === 第二阶段：验证静态数据是否被完整保留 ===
+        print("正在验证静态数据保留...")
+        
+        # 1. 重新构建Excel buffer以便重复读取
+        excel_buffer.seek(0)  # 重置buffer指针
+        result_workbook = openpyxl.load_workbook(excel_buffer)
+        result_sheet = result_workbook.active
+        
+        # 2. 加载源模板文件以供对比
+        source_template_path = 'src/resources/templates/半身裙模板.xlsx'
+        source_workbook = openpyxl.load_workbook(source_template_path)
+        source_sheet = source_workbook.active
+        
+        # 3. 验证"规格尺寸表"的关键单元格
+        print("验证规格尺寸表区域...")
+        
+        # 规格尺寸表标题
+        assert result_sheet['A23'].value == source_sheet['A23'].value, f"A23单元格不匹配，期望: {source_sheet['A23'].value}，实际: {result_sheet['A23'].value}"
+        assert result_sheet['A23'].value == '规格尺寸表', "A23单元格应该包含'规格尺寸表'"
+        
+        # 裙长字段
+        assert result_sheet['B25'].value == source_sheet['B25'].value, f"B25单元格不匹配，期望: {source_sheet['B25'].value}，实际: {result_sheet['B25'].value}"
+        assert result_sheet['B25'].value == '裙长', "B25单元格应该包含'裙长'"
+        
+        # 其他规格字段
+        assert result_sheet['B26'].value == source_sheet['B26'].value, f"B26单元格不匹配，期望: {source_sheet['B26'].value}，实际: {result_sheet['B26'].value}"
+        assert result_sheet['B26'].value == '腰围', "B26单元格应该包含'腰围'"
+        
+        # 4. 验证"明细"的关键单元格
+        print("验证明细区域...")
+        
+        # 明细标题
+        assert result_sheet['A30'].value == source_sheet['A30'].value, f"A30单元格不匹配，期望: {source_sheet['A30'].value}，实际: {result_sheet['A30'].value}"
+        assert result_sheet['A30'].value == '明细', "A30单元格应该包含'明细'"
+        
+        # 表头字段
+        assert result_sheet['A31'].value == source_sheet['A31'].value, f"A31单元格不匹配，期望: {source_sheet['A31'].value}，实际: {result_sheet['A31'].value}"
+        assert result_sheet['A31'].value == '序号', "A31单元格应该包含'序号'"
+        
+        assert result_sheet['C31'].value == source_sheet['C31'].value, f"C31单元格不匹配，期望: {source_sheet['C31'].value}，实际: {result_sheet['C31'].value}"
+        assert result_sheet['C31'].value == '物料编码', "C31单元格应该包含'物料编码'"
+        
+        assert result_sheet['E31'].value == source_sheet['E31'].value, f"E31单元格不匹配，期望: {source_sheet['E31'].value}，实际: {result_sheet['E31'].value}"
+        assert result_sheet['E31'].value == '物料名称', "E31单元格应该包含'物料名称'"
+        
+        # 明细数据行
+        assert result_sheet['E33'].value == source_sheet['E33'].value, f"E33单元格不匹配，期望: {source_sheet['E33'].value}，实际: {result_sheet['E33'].value}"
+        assert result_sheet['E33'].value == '吊牌流苏', "E33单元格应该包含'吊牌流苏'"
+        
+        print("✅ 静态数据保留验证完全通过！")
+        
+    except Exception as e:
+        assert False, f"测试失败，无法验证Excel文件内容: {str(e)}"
+    finally:
+        excel_buffer.close()
