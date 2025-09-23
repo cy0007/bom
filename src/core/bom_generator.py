@@ -56,7 +56,7 @@ class BomGenerator:
         # 静态/半静态字段位置
         'timestamp': 'J2',           # 当前时间
         'style_code': 'B3',          # 款式编码
-        'order_type': 'F3',          # 订单类型（固定"首单"）
+        'order_type': 'H3',          # 订单类型（固定"首单"）
         'product_name_b4': 'B4',     # 品名（B4位置）
         'wave_info': 'F4',           # 波段信息
         'primary_category': 'J4',    # 一级品类信息
@@ -332,15 +332,32 @@ class BomGenerator:
         # 1. 确保输出目录存在
         os.makedirs(output_dir, exist_ok=True)
         
-        # 2. 加载模板文件
+        # 2. 获取产品基本信息
+        style_info = self.find_style_info(style_code)
+        
+        # 3. 动态模板选择逻辑（与generate_bom_file_to_buffer保持一致）
+        # a. 获取当前处理款式的二级品类（secondary_category）
+        secondary_category = style_info[self.CATEGORY_COL]
+        
+        # b. 使用self.category_mapping字典，根据secondary_category查找对应的一级品类（primary_category）
+        if secondary_category not in self.category_mapping:
+            raise ValueError(f"错误：未定义的品类 '{secondary_category}'，请在category_mapping.json中配置。")
+        
+        primary_category = self.category_mapping[secondary_category]
+        
+        # c. 根据primary_category构建模板文件的路径
+        template_path = resource_path(f'templates/{primary_category}模板.xlsx')
+        
+        # d. 加载这个动态确定的模板文件
         try:
-            workbook = openpyxl.load_workbook(self.template_path)
+            workbook = openpyxl.load_workbook(template_path)
             sheet = workbook.active
         except FileNotFoundError:
-            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{self.template_path}")
+            raise FileNotFoundError(f"错误：BOM模板文件未找到，路径：{template_path}")
         
-        # 3. 获取产品基本信息
-        style_info = self.find_style_info(style_code)
+        # e. 填充一级品类和二级品类
+        sheet['J4'] = primary_category
+        sheet['J5'] = secondary_category
         
         # 4. 生成品名（HECO + 波段 + 品类 + 款式编码）
         product_name = f"HECO{style_info[self.WAVE_COL]}{style_info[self.CATEGORY_COL]}{style_code}"
@@ -357,6 +374,9 @@ class BomGenerator:
         
         # 固定写入 "首单"
         self._write_to_cell(sheet, config['order_type'], "首单")
+        
+        # 清空设计师字段 E3（清除模板预填充内容）
+        sheet['E3'].value = None
         
         # 品名（B4位置）
         self._write_to_cell(sheet, config['product_name_b4'], product_name)
@@ -382,12 +402,12 @@ class BomGenerator:
                 # 1. 写入颜色名称
                 self._write_to_cell(sheet, color_cell_addr, color_info['color'])
                 
-                # 2. 写入规格码 (SKU) - 使用精确的行号和列号
+                # 2. 写入规格码 (SKU) - 使用_write_to_cell方法处理合并单元格
                 # SKU从B列开始，行号由 sku_target_row 决定
-                sheet.cell(row=sku_target_row, column=2).value = color_info['skus']['S']  # B列
-                sheet.cell(row=sku_target_row, column=3).value = color_info['skus']['M']  # C列
-                sheet.cell(row=sku_target_row, column=4).value = color_info['skus']['L']  # D列
-                sheet.cell(row=sku_target_row, column=5).value = color_info['skus']['XL'] # E列
+                self._write_to_cell(sheet, f'B{sku_target_row}', color_info['skus']['S'])  # B列
+                self._write_to_cell(sheet, f'C{sku_target_row}', color_info['skus']['M'])  # C列
+                self._write_to_cell(sheet, f'D{sku_target_row}', color_info['skus']['L'])  # D列
+                self._write_to_cell(sheet, f'E{sku_target_row}', color_info['skus']['XL']) # E列
                 
             except Exception as e:
                 # 提供详细的错误信息
@@ -471,6 +491,9 @@ class BomGenerator:
         # 固定写入 "首单"
         self._write_to_cell(sheet, config['order_type'], "首单")
         
+        # 清空设计师字段 E3（清除模板预填充内容）
+        sheet['E3'].value = None
+        
         # 品名（B4位置）
         self._write_to_cell(sheet, config['product_name_b4'], product_name)
         
@@ -495,12 +518,12 @@ class BomGenerator:
                 # 1. 写入颜色名称
                 self._write_to_cell(sheet, color_cell_addr, color_info['color'])
                 
-                # 2. 写入规格码 (SKU) - 使用精确的行号和列号
+                # 2. 写入规格码 (SKU) - 使用_write_to_cell方法处理合并单元格
                 # SKU从B列开始，行号由 sku_target_row 决定
-                sheet.cell(row=sku_target_row, column=2).value = color_info['skus']['S']  # B列
-                sheet.cell(row=sku_target_row, column=3).value = color_info['skus']['M']  # C列
-                sheet.cell(row=sku_target_row, column=4).value = color_info['skus']['L']  # D列
-                sheet.cell(row=sku_target_row, column=5).value = color_info['skus']['XL'] # E列
+                self._write_to_cell(sheet, f'B{sku_target_row}', color_info['skus']['S'])  # B列
+                self._write_to_cell(sheet, f'C{sku_target_row}', color_info['skus']['M'])  # C列
+                self._write_to_cell(sheet, f'D{sku_target_row}', color_info['skus']['L'])  # D列
+                self._write_to_cell(sheet, f'E{sku_target_row}', color_info['skus']['XL']) # E列
                 
             except Exception as e:
                 # 提供详细的错误信息
